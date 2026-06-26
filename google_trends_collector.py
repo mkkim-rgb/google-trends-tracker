@@ -23,7 +23,7 @@ SHEET_ID    = os.environ["SHEET_ID"]
 SA_FILE     = os.environ.get("GOOGLE_SA_FILE", "service_account.json")
 CONFIG_TAB  = os.environ.get("CONFIG_TAB", "설정")
 TZ_BY_GEO   = {"KR": 540, "JP": 540, "US": -300}
-MONTHLY_FETCH_START = "2018-01-01"   # >5년이라야 구글이 '월' 단위로 반환
+MONTHLY_FETCH_START = "2023-01-01"   # 이 날부터 주간 받아 월별 평균 집계
 MONTHLY_KEEP_FROM   = "2023-01"      # 이 월(YYYY-MM)부터만 기록
 PAUSE = 20          # pytrends 호출 간격(초) — 429 회피
 KW_PAUSE = 30       # 키워드 사이 추가 대기
@@ -90,11 +90,20 @@ def main():
         prefix = f"{brand}_{geo}"
         log(f"[{prefix}] '{kw}' (N={N})")
 
-        # ── 월간: 긴기간(>5년=월단위) 받아 2023-01부터 필터, ×N ──
+        # ── 월간: 주간 받아 월별 평균으로 집계(구글 granularity 무관), ×N ──
         m = fetch(kw, geo, f"{MONTHLY_FETCH_START} {today}")
         time.sleep(PAUSE)
-        m_rows = [[d.strftime("%Y-%m"), kw, v, round(v * N)]
-                  for d, v in m if d.strftime("%Y-%m") >= MONTHLY_KEEP_FROM]
+        msum, mcnt = {}, {}
+        for d, v in m:
+            ym = d.strftime("%Y-%m")
+            if ym < MONTHLY_KEEP_FROM:
+                continue
+            msum[ym] = msum.get(ym, 0) + v
+            mcnt[ym] = mcnt.get(ym, 0) + 1
+        m_rows = []
+        for ym in msum:                       # dict는 삽입순(=시간순) 유지
+            avg = round(msum[ym] / mcnt[ym])   # 그 달 주간지수 평균
+            m_rows.append([ym, kw, avg, round(avg * N)])
         hdr_m = ["년월", "키워드", "상대지수", "계산값"]
         ws = ensure_tab(sh, f"{prefix}_월간", hdr_m)
         if m_rows:
