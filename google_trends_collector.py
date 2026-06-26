@@ -23,15 +23,19 @@ SHEET_ID    = os.environ["SHEET_ID"]
 SA_FILE     = os.environ.get("GOOGLE_SA_FILE", "service_account.json")
 CONFIG_TAB  = os.environ.get("CONFIG_TAB", "설정")
 TZ_BY_GEO   = {"KR": 540, "JP": 540, "US": -300}
-MONTHLY_START = "2023-01-01"
-PAUSE = 12          # pytrends 호출 간격(초) — 429 회피
-MAX_RETRY = 4
+MONTHLY_FETCH_START = "2018-01-01"   # >5년이라야 구글이 '월' 단위로 반환
+MONTHLY_KEEP_FROM   = "2023-01"      # 이 월(YYYY-MM)부터만 기록
+PAUSE = 20          # pytrends 호출 간격(초) — 429 회피
+KW_PAUSE = 30       # 키워드 사이 추가 대기
+MAX_RETRY = 5
 
 def log(*a): print(*a, flush=True)
 
 def trends(geo):
+    # retries/backoff_factor 안 넘김 — pytrends가 urllib3 Retry(method_whitelist)로 깨짐.
+    # 재시도는 fetch()가 직접 처리.
     tz = TZ_BY_GEO.get(geo, 0)
-    return TrendReq(hl="en-US", tz=tz, retries=2, backoff_factor=1.0)
+    return TrendReq(hl="en-US", tz=tz)
 
 def fetch(keyword, geo, timeframe):
     """429 재시도 포함 상대지수 시계열 반환: [(date, value), ...]"""
@@ -86,26 +90,33 @@ def main():
         prefix = f"{brand}_{geo}"
         log(f"[{prefix}] '{kw}' (N={N})")
 
-        # ── 월간: 2023-01 ~ 오늘, 월 단위, ×N ──
-        m = fetch(kw, geo, f"{MONTHLY_START} {today}")
+        # ── 월간: 긴기간(>5년=월단위) 받아 2023-01부터 필터, ×N ──
+        m = fetch(kw, geo, f"{MONTHLY_FETCH_START} {today}")
         time.sleep(PAUSE)
-        m_rows = [[d.strftime("%Y-%m"), kw, v, round(v * N)] for d, v in m]
-        ws = ensure_tab(sh, f"{prefix}_월간", ["년월", "키워드", "상대지수", "계산값"])
-        write_tab(ws, ["년월", "키워드", "상대지수", "계산값"], m_rows)
-        log(f"  월간 {len(m_rows)}행")
+        m_rows = [[d.strftime("%Y-%m"), kw, v, round(v * N)]
+                  for d, v in m if d.strftime("%Y-%m") >= MONTHLY_KEEP_FROM]
+        hdr_m = ["년월", "키워드", "상대지수", "계산값"]
+        ws = ensure_tab(sh, f"{prefix}_월간", hdr_m)
+        if m_rows:
+            write_tab(ws, hdr_m, m_rows); log(f"  월간 {len(m_rows)}행")
+        else:
+            log("  월간 데이터 없음(429 등) — 기존 유지, 덮어쓰기 안함")
 
-        # ── 주간: 최근 1년, 주 단위, 상대지수만 (KR은 시작주+1) ──
+        # ── 주간: 최근 1년(주단위), 상대지수만 (KR은 시작주+1=월요일) ──
         w = fetch(kw, geo, "today 12-m")
-        time.sleep(PAUSE)
         if geo == "KR":
-            headers = ["시작주", "키워드", "상대지수", "시작주+1"]
+            hdr_w = ["시작주", "키워드", "상대지수", "시작주+1"]
             w_rows = [[d.isoformat(), kw, v, (d + datetime.timedelta(days=1)).isoformat()] for d, v in w]
         else:
-            headers = ["시작주", "키워드", "상대지수"]
+            hdr_w = ["시작주", "키워드", "상대지수"]
             w_rows = [[d.isoformat(), kw, v] for d, v in w]
-        ws = ensure_tab(sh, f"{prefix}_주간", headers)
-        write_tab(ws, headers, w_rows)
-        log(f"  주간 {len(w_rows)}행")
+        ws = ensure_tab(sh, f"{prefix}_주간", hdr_w)
+        if w_rows:
+            write_tab(ws, hdr_w, w_rows); log(f"  주간 {len(w_rows)}행")
+        else:
+            log("  주간 데이터 없음(429 등) — 기존 유지, 덮어쓰기 안함")
+
+        time.sleep(KW_PAUSE)   # 다음 키워드 전 추가 대기(429 회피)
 
     log("완료")
 
