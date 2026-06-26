@@ -15,7 +15,7 @@ Naver Keyword Estimator TF / Google 확장
   GOOGLE_SA_FILE      서비스계정 JSON 경로 (기본 service_account.json)
   CONFIG_TAB          설정탭 이름 (기본 '설정')
 """
-import os, sys, time, datetime
+import os, sys, time, datetime, json
 import gspread
 from pytrends.request import TrendReq
 
@@ -65,7 +65,9 @@ def write_tab(ws, headers, rows):
 
 def main():
     today = datetime.date.today().isoformat()
-    gc = gspread.service_account(filename=SA_FILE)
+    with open(SA_FILE, encoding="utf-8-sig") as f:   # BOM 견디게
+        sa_info = json.load(f)
+    gc = gspread.service_account_from_dict(sa_info)
     sh = gc.open_by_key(SHEET_ID)
     cfg = sh.worksheet(CONFIG_TAB).get_all_records()  # [{브랜드,나라,키워드,쿼리지수}, ...]
     log(f"설정 {len(cfg)}행 로드, 오늘={today}")
