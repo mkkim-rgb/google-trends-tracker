@@ -71,6 +71,7 @@ def main():
     log(f"설정 {len(cfg)}행 로드, 오늘={today}")
 
     for r in cfg:
+        r = {(k.strip() if isinstance(k, str) else k): v for k, v in r.items()}  # 헤더 공백 방어
         brand = str(r.get("브랜드", "")).strip()
         geo   = str(r.get("나라", "")).strip().upper()
         kw    = str(r.get("키워드", "")).strip()
