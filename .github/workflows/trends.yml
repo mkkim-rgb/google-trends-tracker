@@ -1,0 +1,29 @@
+name: google-trends-collect
+
+on:
+  schedule:
+    # 매주 월요일 06:00 KST = 일요일 21:00 UTC
+    - cron: "0 21 * * 0"
+  workflow_dispatch: {}   # 수동 실행 버튼
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Write service account key
+        run: echo '${{ secrets.GOOGLE_SA_KEY }}' > service_account.json
+
+      - name: Run collector
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          GOOGLE_SA_FILE: service_account.json
+        run: python google_trends_collector.py

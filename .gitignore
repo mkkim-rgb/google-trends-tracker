@@ -1,0 +1,8 @@
+# 비밀키·자격증명 — 절대 커밋 금지
+service_account.json
+*.json
+!package.json
+.env
+*.key
+__pycache__/
+*.pyc
