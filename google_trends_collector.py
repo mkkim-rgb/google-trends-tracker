@@ -59,7 +59,7 @@ def fetch(keyword, geo, timeframe):
 def resolve_query(kw, typ):
     """유형이 '주제'면 구글 엔티티(Topic) MID로 변환. 검색어면 그대로.
        반환: (질의어, 표시정보)"""
-    if typ != "주제":
+    if "주제" not in typ:        # '주제','주제어','주제(Topic)' 등 모두 주제로 인식
         return kw, "검색어"
     if kw.startswith("/g/") or kw.startswith("/m/"):   # 이미 MID 직접 입력
         return kw, f"주제(MID직접:{kw})"
