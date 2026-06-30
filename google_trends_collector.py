@@ -55,6 +55,24 @@ def fetch(keyword, geo, timeframe):
     log(f"  !! {keyword}/{geo} 실패(최대 재시도 초과)")
     return []
 
+def resolve_query(kw, typ):
+    """유형이 '주제'면 구글 엔티티(Topic) MID로 변환. 검색어면 그대로.
+       반환: (질의어, 표시정보)"""
+    if typ != "주제":
+        return kw, "검색어"
+    if kw.startswith("/g/") or kw.startswith("/m/"):   # 이미 MID 직접 입력
+        return kw, f"주제(MID직접:{kw})"
+    try:
+        sug = TrendReq(hl="en-US").suggestions(kw)   # 엔티티 후보
+        time.sleep(5)
+        if sug:
+            s = sug[0]
+            return s["mid"], f"주제:{s['title']}({s['type']}) {s['mid']}"
+    except Exception as e:
+        log(f"    주제 조회 실패({kw}): {e}")
+    log(f"    주제 못 찾음({kw}) → 검색어로 폴백")
+    return kw, "주제실패→검색어폴백"
+
 def ensure_tab(sh, name, headers):
     try:
         ws = sh.worksheet(name)
@@ -108,6 +126,7 @@ def main():
         brand = str(r.get("브랜드", "")).strip()
         geo   = str(r.get("나라", "")).strip().upper()
         kw    = str(r.get("키워드", "")).strip()
+        typ   = str(r.get("유형", "")).strip() or "검색어"   # 검색어 / 주제 (기본 검색어)
         try:
             N = float(r.get("쿼리지수", 0) or 0)
         except ValueError:
@@ -119,7 +138,7 @@ def main():
         prefix = f"{brand}_{geo}"
         if prefix not in groups:
             groups[prefix] = {"geo": geo, "items": []}; order.append(prefix)
-        groups[prefix]["items"].append((kw, N))
+        groups[prefix]["items"].append((kw, N, typ))
 
     for prefix in order:
         geo, items = groups[prefix]["geo"], groups[prefix]["items"]
@@ -131,10 +150,11 @@ def main():
         prev_m, prev_w = existing_by_kw(ws_m), existing_by_kw(ws_w)  # 실패 키워드 보존용
         m_by_kw, w_by_kw = {}, {}
 
-        for kw, N in items:
-            log(f"  - '{kw}' (N={N})")
+        for kw, N, typ in items:
+            qterm, info = resolve_query(kw, typ)   # 주제면 MID로 변환, 검색어면 그대로
+            log(f"  - '{kw}' (N={N}, {info})")
             # 월간: 긴 범위(>5년)=월단위 → 2023-01부터, 가공없이 ×N
-            m = fetch(kw, geo, f"{MONTHLY_FETCH_START} {today}")
+            m = fetch(qterm, geo, f"{MONTHLY_FETCH_START} {today}")
             time.sleep(PAUSE)
             rows = [[d.strftime("%Y-%m"), kw, v, round(v * N)]
                     for d, v in m if d.strftime("%Y-%m") >= MONTHLY_KEEP_FROM]
@@ -143,7 +163,7 @@ def main():
             else:
                 m_by_kw[kw] = prev_m.get(kw, []); log(f"    월간 실패(429) → 기존 {len(m_by_kw[kw])}행 유지")
             # 주간: 최근 1년(주단위), 상대지수만 (KR은 시작주+1=월요일)
-            w = fetch(kw, geo, "today 12-m")
+            w = fetch(qterm, geo, "today 12-m")
             if geo == "KR":
                 wr = [[d.isoformat(), kw, v, (d + datetime.timedelta(days=1)).isoformat()] for d, v in w]
             else:
@@ -155,8 +175,8 @@ def main():
             time.sleep(KW_PAUSE)
 
         # 키워드 순서대로 누적해서 탭마다 한 번에 기록
-        all_m = [row for kw, _ in items for row in m_by_kw.get(kw, [])]
-        all_w = [row for kw, _ in items for row in w_by_kw.get(kw, [])]
+        all_m = [row for kw, _, _ in items for row in m_by_kw.get(kw, [])]
+        all_w = [row for kw, _, _ in items for row in w_by_kw.get(kw, [])]
         if all_m:
             write_tab(ws_m, hdr_m, all_m); log(f"  → {prefix}_월간 {len(all_m)}행")
         if all_w:
