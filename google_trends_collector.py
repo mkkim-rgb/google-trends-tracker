@@ -24,8 +24,9 @@ SA_FILE     = os.environ.get("GOOGLE_SA_FILE", "service_account.json")
 CONFIG_TAB  = os.environ.get("CONFIG_TAB", "설정")
 ONLY_COUNTRY = os.environ.get("COUNTRY", "").strip().upper()  # 설정 시 그 나라만 처리(나라별 분산 실행)
 TZ_BY_GEO   = {"KR": 540, "JP": 540, "US": -300}
-MONTHLY_FETCH_START = "2016-01-01"   # >5년이라야 구글이 '월' 단위로 반환 (가공X)
-MONTHLY_KEEP_FROM   = "2023-01"      # 이 월(YYYY-MM)부터만 기록
+MONTHLY_FETCH_START = "2020-01-01"   # 받아오기 시작(2020~현재=6.5년 >5년 → 월단위)
+MONTHLY_KEEP_FROM   = "2023-01"      # 기록은 이 월(YYYY-MM)부터
+WEEKLY_START        = "2023-01-01"   # 주간 시작일(이날~현재, <5년이라 주단위 유지)
 PAUSE = 20          # pytrends 호출 간격(초) — 429 회피
 KW_PAUSE = 30       # 키워드 사이 추가 대기
 MAX_RETRY = 5
@@ -188,7 +189,7 @@ def main():
             qterms = [q for _, _, q in chunk]
             mdata = fetch_multi(qterms, geo, f"{MONTHLY_FETCH_START} {today}")  # 월간 동시
             time.sleep(PAUSE)
-            wdata = fetch_multi(qterms, geo, "today 12-m")                       # 주간 동시
+            wdata = fetch_multi(qterms, geo, f"{WEEKLY_START} {today}")           # 주간 동시(2023-01~)
             time.sleep(KW_PAUSE)
             for kw, N, qterm in chunk:
                 # 월간: 2023-01부터, 가공없이 ×N
