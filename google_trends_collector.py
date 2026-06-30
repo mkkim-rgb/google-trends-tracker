@@ -23,6 +23,7 @@ SHEET_ID    = os.environ["SHEET_ID"]
 SA_FILE     = os.environ.get("GOOGLE_SA_FILE", "service_account.json")
 CONFIG_TAB  = os.environ.get("CONFIG_TAB", "설정")
 ONLY_COUNTRY = os.environ.get("COUNTRY", "").strip().upper()  # 설정 시 그 나라만 처리(나라별 분산 실행)
+MODE = os.environ.get("MODE", "both").strip().lower()        # weekly / monthly / both(기본)
 TZ_BY_GEO   = {"KR": 540, "JP": 540, "US": -300}
 MONTHLY_FETCH_START = "2020-01-01"   # 받아오기 시작(2020~현재=6.5년 >5년 → 월단위)
 MONTHLY_KEEP_FROM   = "2023-01"      # 기록은 이 월(YYYY-MM)부터
@@ -149,7 +150,12 @@ def apply_calc_formulas(sh):
         log(f"  계산값 수식: {ws.title} {n-1}행")
 
 def main():
-    today = datetime.date.today().isoformat()
+    today_d = datetime.date.today()
+    today = today_d.isoformat()
+    keep_until = (today_d.replace(day=1) - datetime.timedelta(days=1)).strftime("%Y-%m")  # 전월(YYYY-MM): 진행중인 이번달 제외
+    do_month = MODE in ("both", "monthly")
+    do_week  = MODE in ("both", "weekly")
+    log(f"MODE={MODE} (월간={do_month}/주간={do_week}), 월간 기록범위 {MONTHLY_KEEP_FROM}~{keep_until}")
     with open(SA_FILE, encoding="utf-8-sig") as f:   # BOM 견디게
         sa_info = json.load(f)
     gc = gspread.service_account_from_dict(sa_info)
@@ -201,29 +207,33 @@ def main():
             if len(resolved) > 5:
                 log(f"  ※ 5개 초과 → {ci//5+1}번째 묶음만 같은 스케일 (묶음 간 비교 불가)")
             qterms = [q for _, _, q in chunk]
-            mdata = fetch_multi(qterms, geo, f"{MONTHLY_FETCH_START} {today}")  # 월간 동시
-            time.sleep(PAUSE)
-            wdata = fetch_multi(qterms, geo, f"{WEEKLY_START} {today}")           # 주간 동시(2023-01~)
-            time.sleep(KW_PAUSE)
+            mdata = fetch_multi(qterms, geo, f"{MONTHLY_FETCH_START} {today}") if do_month else {}  # 월간 동시
+            if do_month:
+                time.sleep(PAUSE)
+            wdata = fetch_multi(qterms, geo, f"{WEEKLY_START} {today}") if do_week else {}           # 주간 동시(2023-01~)
+            if do_week:
+                time.sleep(KW_PAUSE)
             for kw, N, qterm in chunk:
-                # 월간: 2023-01부터, 가공없이 ×N
-                m = mdata.get(qterm, [])
-                rows = [[d.strftime("%Y-%m"), kw, v, round(v * N)]
-                        for d, v in m if d.strftime("%Y-%m") >= MONTHLY_KEEP_FROM]
-                if rows:
-                    m_by_kw[kw] = rows; log(f"    {kw} 월간 {len(rows)}행")
-                else:
-                    m_by_kw[kw] = prev_m.get(kw, []); log(f"    {kw} 월간 실패 → 기존 {len(m_by_kw[kw])}행 유지")
-                # 주간: 상대지수만 (KR은 시작주+1=월요일)
-                w = wdata.get(qterm, [])
-                if geo == "KR":
-                    wr = [[d.isoformat(), kw, v, (d + datetime.timedelta(days=1)).isoformat()] for d, v in w]
-                else:
-                    wr = [[d.isoformat(), kw, v] for d, v in w]
-                if wr:
-                    w_by_kw[kw] = wr; log(f"    {kw} 주간 {len(wr)}행")
-                else:
-                    w_by_kw[kw] = prev_w.get(kw, []); log(f"    {kw} 주간 실패 → 기존 {len(w_by_kw[kw])}행 유지")
+                if do_month:
+                    # 월간: MONTHLY_KEEP_FROM ~ 전월(keep_until)만 = 진행중인 이번달 제외(안정)
+                    m = mdata.get(qterm, [])
+                    rows = [[d.strftime("%Y-%m"), kw, v, round(v * N)]
+                            for d, v in m if MONTHLY_KEEP_FROM <= d.strftime("%Y-%m") <= keep_until]
+                    if rows:
+                        m_by_kw[kw] = rows; log(f"    {kw} 월간 {len(rows)}행")
+                    else:
+                        m_by_kw[kw] = prev_m.get(kw, []); log(f"    {kw} 월간 실패 → 기존 {len(m_by_kw[kw])}행 유지")
+                if do_week:
+                    # 주간: 상대지수만 (KR은 시작주+1=월요일)
+                    w = wdata.get(qterm, [])
+                    if geo == "KR":
+                        wr = [[d.isoformat(), kw, v, (d + datetime.timedelta(days=1)).isoformat()] for d, v in w]
+                    else:
+                        wr = [[d.isoformat(), kw, v] for d, v in w]
+                    if wr:
+                        w_by_kw[kw] = wr; log(f"    {kw} 주간 {len(wr)}행")
+                    else:
+                        w_by_kw[kw] = prev_w.get(kw, []); log(f"    {kw} 주간 실패 → 기존 {len(w_by_kw[kw])}행 유지")
 
         # 키워드 순서대로 누적해서 탭마다 한 번에 기록
         all_m = [row for kw, _, _ in items for row in m_by_kw.get(kw, [])]
@@ -233,7 +243,8 @@ def main():
         if all_w:
             write_tab(ws_w, hdr_w, all_w); log(f"  → {prefix}_주간 {len(all_w)}행")
 
-    apply_calc_formulas(sh)   # 계산값을 설정N 참조 수식으로 (자동 반영)
+    if do_month:
+        apply_calc_formulas(sh)   # 계산값을 설정N 참조 수식으로 (자동 반영)
     log("완료")
 
 if __name__ == "__main__":

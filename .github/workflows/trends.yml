@@ -2,15 +2,24 @@ name: google-trends-collect
 
 on:
   schedule:
-    - cron: "0 21 * * 0"   # KR  (월요일 06:00 KST = 일 21:00 UTC)
-    - cron: "0 22 * * 0"   # US  (월요일 07:00 KST)
-    - cron: "0 23 * * 0"   # JP  (월요일 08:00 KST)
+    # ── 주간: 매주 월요일 (MODE=weekly), 나라별 시차 ──
+    - cron: "0 21 * * 0"   # KR 월 06:00 KST
+    - cron: "0 22 * * 0"   # US 월 07:00 KST
+    - cron: "0 23 * * 0"   # JP 월 08:00 KST
+    # ── 월간: 매월 2일 (MODE=monthly, 전월까지), 나라별 시차 ──
+    - cron: "0 21 1 * *"   # KR 2일 06:00 KST (=1일 21:00 UTC)
+    - cron: "0 22 1 * *"   # US 2일 07:00 KST
+    - cron: "0 23 1 * *"   # JP 2일 08:00 KST
   workflow_dispatch:
     inputs:
       country:
         description: "특정 나라만 (KR/US/JP). 비우면 전체"
         required: false
         default: ""
+      mode:
+        description: "weekly / monthly / both"
+        required: false
+        default: "both"
 
 jobs:
   collect:
@@ -25,15 +34,20 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
-      - name: Pick country (스케줄별 나라 매핑 / 수동은 입력값)
+      - name: Pick country & mode (스케줄별 매핑 / 수동은 입력값)
         id: pick
         run: |
           case "${{ github.event.schedule }}" in
-            "0 21 * * 0") echo "country=KR" >> "$GITHUB_OUTPUT" ;;
-            "0 22 * * 0") echo "country=US" >> "$GITHUB_OUTPUT" ;;
-            "0 23 * * 0") echo "country=JP" >> "$GITHUB_OUTPUT" ;;
-            *) echo "country=${{ github.event.inputs.country }}" >> "$GITHUB_OUTPUT" ;;
+            "0 21 * * 0") C=KR; M=weekly ;;
+            "0 22 * * 0") C=US; M=weekly ;;
+            "0 23 * * 0") C=JP; M=weekly ;;
+            "0 21 1 * *") C=KR; M=monthly ;;
+            "0 22 1 * *") C=US; M=monthly ;;
+            "0 23 1 * *") C=JP; M=monthly ;;
+            *) C="${{ github.event.inputs.country }}"; M="${{ github.event.inputs.mode }}" ;;
           esac
+          echo "country=$C" >> "$GITHUB_OUTPUT"
+          echo "mode=${M:-both}" >> "$GITHUB_OUTPUT"
 
       - name: Write service account key
         run: echo '${{ secrets.GOOGLE_SA_KEY }}' > service_account.json
@@ -43,4 +57,5 @@ jobs:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           GOOGLE_SA_FILE: service_account.json
           COUNTRY: ${{ steps.pick.outputs.country }}
+          MODE: ${{ steps.pick.outputs.mode }}
         run: python google_trends_collector.py
