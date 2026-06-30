@@ -68,6 +68,29 @@ def write_tab(ws, headers, rows):
     # 숫자는 int로 넘기므로 RAW여도 숫자로 저장됨.
     ws.update(values=[headers] + rows, range_name="A1", value_input_option="RAW")
 
+def _coerce(row):
+    """시트에서 읽은 문자열 행의 숫자칸(상대지수·계산값)을 int로, 날짜칸은 그대로."""
+    out = list(row)
+    for i in (2, 3):
+        if len(out) > i:
+            try:
+                out[i] = int(out[i])
+            except (ValueError, TypeError):
+                pass
+    return out
+
+def existing_by_kw(ws):
+    """탭 기존 내용을 {키워드: [행,...]}로. 실패 키워드 데이터 보존용."""
+    out = {}
+    try:
+        vals = ws.get_all_values()
+    except Exception:
+        return out
+    for row in vals[1:]:
+        if len(row) >= 2 and row[1]:
+            out.setdefault(row[1], []).append(_coerce(row))
+    return out
+
 def main():
     today = datetime.date.today().isoformat()
     with open(SA_FILE, encoding="utf-8-sig") as f:   # BOM 견디게
@@ -77,6 +100,8 @@ def main():
     cfg = sh.worksheet(CONFIG_TAB).get_all_records()  # [{브랜드,나라,키워드,쿼리지수}, ...]
     log(f"설정 {len(cfg)}행 로드, 오늘={today}")
 
+    # 설정을 brand_country(prefix)로 그룹화 — 한 탭에 여러 키워드 누적
+    groups, order = {}, []
     for r in cfg:
         r = {(k.strip() if isinstance(k, str) else k): v for k, v in r.items()}  # 헤더 공백 방어
         brand = str(r.get("브랜드", "")).strip()
@@ -89,36 +114,50 @@ def main():
         if not (brand and geo and kw):
             continue
         prefix = f"{brand}_{geo}"
-        log(f"[{prefix}] '{kw}' (N={N})")
+        if prefix not in groups:
+            groups[prefix] = {"geo": geo, "items": []}; order.append(prefix)
+        groups[prefix]["items"].append((kw, N))
 
-        # ── 월간: 긴 범위(>5년) 받으면 구글이 '월' 단위로 줌 → 2023-01부터 필터 ──
-        #    (평균 등 가공 없음. 구글의 실제 월 상대지수 그대로 × N)
-        m = fetch(kw, geo, f"{MONTHLY_FETCH_START} {today}")
-        time.sleep(PAUSE)
-        m_rows = [[d.strftime("%Y-%m"), kw, v, round(v * N)]
-                  for d, v in m if d.strftime("%Y-%m") >= MONTHLY_KEEP_FROM]
+    for prefix in order:
+        geo, items = groups[prefix]["geo"], groups[prefix]["items"]
+        log(f"[{prefix}] 키워드 {len(items)}개")
         hdr_m = ["년월", "키워드", "상대지수", "계산값"]
-        ws = ensure_tab(sh, f"{prefix}_월간", hdr_m)
-        if m_rows:
-            write_tab(ws, hdr_m, m_rows); log(f"  월간 {len(m_rows)}행")
-        else:
-            log("  월간 데이터 없음(429 등) — 기존 유지, 덮어쓰기 안함")
+        hdr_w = ["시작주", "키워드", "상대지수", "시작주+1"] if geo == "KR" else ["시작주", "키워드", "상대지수"]
+        ws_m = ensure_tab(sh, f"{prefix}_월간", hdr_m)
+        ws_w = ensure_tab(sh, f"{prefix}_주간", hdr_w)
+        prev_m, prev_w = existing_by_kw(ws_m), existing_by_kw(ws_w)  # 실패 키워드 보존용
+        m_by_kw, w_by_kw = {}, {}
 
-        # ── 주간: 최근 1년(주단위), 상대지수만 (KR은 시작주+1=월요일) ──
-        w = fetch(kw, geo, "today 12-m")
-        if geo == "KR":
-            hdr_w = ["시작주", "키워드", "상대지수", "시작주+1"]
-            w_rows = [[d.isoformat(), kw, v, (d + datetime.timedelta(days=1)).isoformat()] for d, v in w]
-        else:
-            hdr_w = ["시작주", "키워드", "상대지수"]
-            w_rows = [[d.isoformat(), kw, v] for d, v in w]
-        ws = ensure_tab(sh, f"{prefix}_주간", hdr_w)
-        if w_rows:
-            write_tab(ws, hdr_w, w_rows); log(f"  주간 {len(w_rows)}행")
-        else:
-            log("  주간 데이터 없음(429 등) — 기존 유지, 덮어쓰기 안함")
+        for kw, N in items:
+            log(f"  - '{kw}' (N={N})")
+            # 월간: 긴 범위(>5년)=월단위 → 2023-01부터, 가공없이 ×N
+            m = fetch(kw, geo, f"{MONTHLY_FETCH_START} {today}")
+            time.sleep(PAUSE)
+            rows = [[d.strftime("%Y-%m"), kw, v, round(v * N)]
+                    for d, v in m if d.strftime("%Y-%m") >= MONTHLY_KEEP_FROM]
+            if rows:
+                m_by_kw[kw] = rows; log(f"    월간 {len(rows)}행")
+            else:
+                m_by_kw[kw] = prev_m.get(kw, []); log(f"    월간 실패(429) → 기존 {len(m_by_kw[kw])}행 유지")
+            # 주간: 최근 1년(주단위), 상대지수만 (KR은 시작주+1=월요일)
+            w = fetch(kw, geo, "today 12-m")
+            if geo == "KR":
+                wr = [[d.isoformat(), kw, v, (d + datetime.timedelta(days=1)).isoformat()] for d, v in w]
+            else:
+                wr = [[d.isoformat(), kw, v] for d, v in w]
+            if wr:
+                w_by_kw[kw] = wr; log(f"    주간 {len(wr)}행")
+            else:
+                w_by_kw[kw] = prev_w.get(kw, []); log(f"    주간 실패 → 기존 {len(w_by_kw[kw])}행 유지")
+            time.sleep(KW_PAUSE)
 
-        time.sleep(KW_PAUSE)   # 다음 키워드 전 추가 대기(429 회피)
+        # 키워드 순서대로 누적해서 탭마다 한 번에 기록
+        all_m = [row for kw, _ in items for row in m_by_kw.get(kw, [])]
+        all_w = [row for kw, _ in items for row in w_by_kw.get(kw, [])]
+        if all_m:
+            write_tab(ws_m, hdr_m, all_m); log(f"  → {prefix}_월간 {len(all_m)}행")
+        if all_w:
+            write_tab(ws_w, hdr_w, all_w); log(f"  → {prefix}_주간 {len(all_w)}행")
 
     log("완료")
 
