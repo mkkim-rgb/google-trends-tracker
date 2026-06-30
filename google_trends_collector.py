@@ -73,6 +73,29 @@ def resolve_query(kw, typ):
     log(f"    주제 못 찾음({kw}) → 검색어로 폴백")
     return kw, "주제실패→검색어폴백"
 
+def fetch_multi(qterms, geo, timeframe):
+    """여러 질의어를 '한 번에' 조회(같은 정규화=서로 비교 가능). 최대 5개.
+       반환: {질의어: [(date, value)]}"""
+    qterms = qterms[:5]
+    for attempt in range(MAX_RETRY):
+        try:
+            pt = trends(geo)
+            pt.build_payload(qterms, timeframe=timeframe, geo=geo)
+            df = pt.interest_over_time()
+            out = {}
+            for q in qterms:
+                if df is not None and not df.empty and q in df.columns:
+                    out[q] = [(i.date(), int(r[q])) for i, r in df.iterrows()]
+                else:
+                    out[q] = []
+            return out
+        except Exception as e:
+            wait = PAUSE * (attempt + 1)
+            log(f"  ! 그룹조회/{geo} 재시도({attempt+1}) {type(e).__name__}: {e} → {wait}s 대기")
+            time.sleep(wait)
+    log(f"  !! 그룹조회/{geo} 실패(최대 재시도 초과)")
+    return {q: [] for q in qterms}
+
 def ensure_tab(sh, name, headers):
     try:
         ws = sh.worksheet(name)
@@ -150,29 +173,42 @@ def main():
         prev_m, prev_w = existing_by_kw(ws_m), existing_by_kw(ws_w)  # 실패 키워드 보존용
         m_by_kw, w_by_kw = {}, {}
 
+        # 키워드별 질의어 해석(검색어/주제)
+        resolved = []
         for kw, N, typ in items:
-            qterm, info = resolve_query(kw, typ)   # 주제면 MID로 변환, 검색어면 그대로
-            log(f"  - '{kw}' (N={N}, {info})")
-            # 월간: 긴 범위(>5년)=월단위 → 2023-01부터, 가공없이 ×N
-            m = fetch(qterm, geo, f"{MONTHLY_FETCH_START} {today}")
+            qterm, info = resolve_query(kw, typ)
+            log(f"  - '{kw}' (N={N}, {info}) → {qterm}")
+            resolved.append((kw, N, qterm))
+
+        # 5개씩 '같이' 조회 — 같은 정규화(서로 비교 가능), 그룹당 호출 1회씩
+        for ci in range(0, len(resolved), 5):
+            chunk = resolved[ci:ci + 5]
+            if len(resolved) > 5:
+                log(f"  ※ 5개 초과 → {ci//5+1}번째 묶음만 같은 스케일 (묶음 간 비교 불가)")
+            qterms = [q for _, _, q in chunk]
+            mdata = fetch_multi(qterms, geo, f"{MONTHLY_FETCH_START} {today}")  # 월간 동시
             time.sleep(PAUSE)
-            rows = [[d.strftime("%Y-%m"), kw, v, round(v * N)]
-                    for d, v in m if d.strftime("%Y-%m") >= MONTHLY_KEEP_FROM]
-            if rows:
-                m_by_kw[kw] = rows; log(f"    월간 {len(rows)}행")
-            else:
-                m_by_kw[kw] = prev_m.get(kw, []); log(f"    월간 실패(429) → 기존 {len(m_by_kw[kw])}행 유지")
-            # 주간: 최근 1년(주단위), 상대지수만 (KR은 시작주+1=월요일)
-            w = fetch(qterm, geo, "today 12-m")
-            if geo == "KR":
-                wr = [[d.isoformat(), kw, v, (d + datetime.timedelta(days=1)).isoformat()] for d, v in w]
-            else:
-                wr = [[d.isoformat(), kw, v] for d, v in w]
-            if wr:
-                w_by_kw[kw] = wr; log(f"    주간 {len(wr)}행")
-            else:
-                w_by_kw[kw] = prev_w.get(kw, []); log(f"    주간 실패 → 기존 {len(w_by_kw[kw])}행 유지")
+            wdata = fetch_multi(qterms, geo, "today 12-m")                       # 주간 동시
             time.sleep(KW_PAUSE)
+            for kw, N, qterm in chunk:
+                # 월간: 2023-01부터, 가공없이 ×N
+                m = mdata.get(qterm, [])
+                rows = [[d.strftime("%Y-%m"), kw, v, round(v * N)]
+                        for d, v in m if d.strftime("%Y-%m") >= MONTHLY_KEEP_FROM]
+                if rows:
+                    m_by_kw[kw] = rows; log(f"    {kw} 월간 {len(rows)}행")
+                else:
+                    m_by_kw[kw] = prev_m.get(kw, []); log(f"    {kw} 월간 실패 → 기존 {len(m_by_kw[kw])}행 유지")
+                # 주간: 상대지수만 (KR은 시작주+1=월요일)
+                w = wdata.get(qterm, [])
+                if geo == "KR":
+                    wr = [[d.isoformat(), kw, v, (d + datetime.timedelta(days=1)).isoformat()] for d, v in w]
+                else:
+                    wr = [[d.isoformat(), kw, v] for d, v in w]
+                if wr:
+                    w_by_kw[kw] = wr; log(f"    {kw} 주간 {len(wr)}행")
+                else:
+                    w_by_kw[kw] = prev_w.get(kw, []); log(f"    {kw} 주간 실패 → 기존 {len(w_by_kw[kw])}행 유지")
 
         # 키워드 순서대로 누적해서 탭마다 한 번에 기록
         all_m = [row for kw, _, _ in items for row in m_by_kw.get(kw, [])]
