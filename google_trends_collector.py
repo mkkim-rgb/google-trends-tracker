@@ -64,8 +64,9 @@ def ensure_tab(sh, name, headers):
 
 def write_tab(ws, headers, rows):
     ws.clear()
-    # gspread 6.x 시그니처: range_name 먼저
-    ws.update(values=[headers] + rows, range_name="A1", value_input_option="USER_ENTERED")
+    # RAW: 시트가 '2026-04' 등을 날짜로 멋대로 해석하지 않게(년월/시작주 텍스트 보존).
+    # 숫자는 int로 넘기므로 RAW여도 숫자로 저장됨.
+    ws.update(values=[headers] + rows, range_name="A1", value_input_option="RAW")
 
 def main():
     today = datetime.date.today().isoformat()
