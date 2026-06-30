@@ -22,6 +22,7 @@ from pytrends.request import TrendReq
 SHEET_ID    = os.environ["SHEET_ID"]
 SA_FILE     = os.environ.get("GOOGLE_SA_FILE", "service_account.json")
 CONFIG_TAB  = os.environ.get("CONFIG_TAB", "설정")
+ONLY_COUNTRY = os.environ.get("COUNTRY", "").strip().upper()  # 설정 시 그 나라만 처리(나라별 분산 실행)
 TZ_BY_GEO   = {"KR": 540, "JP": 540, "US": -300}
 MONTHLY_FETCH_START = "2016-01-01"   # >5년이라야 구글이 '월' 단위로 반환 (가공X)
 MONTHLY_KEEP_FROM   = "2023-01"      # 이 월(YYYY-MM)부터만 기록
@@ -112,6 +113,8 @@ def main():
         except ValueError:
             N = 0.0
         if not (brand and geo and kw):
+            continue
+        if ONLY_COUNTRY and geo != ONLY_COUNTRY:   # 나라별 분산 실행
             continue
         prefix = f"{brand}_{geo}"
         if prefix not in groups:

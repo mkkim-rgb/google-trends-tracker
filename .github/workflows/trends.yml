@@ -2,9 +2,15 @@ name: google-trends-collect
 
 on:
   schedule:
-    # 매주 월요일 06:00 KST = 일요일 21:00 UTC
-    - cron: "0 21 * * 0"
-  workflow_dispatch: {}   # 수동 실행 버튼
+    - cron: "0 21 * * 0"   # KR  (월요일 06:00 KST = 일 21:00 UTC)
+    - cron: "0 22 * * 0"   # US  (월요일 07:00 KST)
+    - cron: "0 23 * * 0"   # JP  (월요일 08:00 KST)
+  workflow_dispatch:
+    inputs:
+      country:
+        description: "특정 나라만 (KR/US/JP). 비우면 전체"
+        required: false
+        default: ""
 
 jobs:
   collect:
@@ -19,6 +25,16 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
+      - name: Pick country (스케줄별 나라 매핑 / 수동은 입력값)
+        id: pick
+        run: |
+          case "${{ github.event.schedule }}" in
+            "0 21 * * 0") echo "country=KR" >> "$GITHUB_OUTPUT" ;;
+            "0 22 * * 0") echo "country=US" >> "$GITHUB_OUTPUT" ;;
+            "0 23 * * 0") echo "country=JP" >> "$GITHUB_OUTPUT" ;;
+            *) echo "country=${{ github.event.inputs.country }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Write service account key
         run: echo '${{ secrets.GOOGLE_SA_KEY }}' > service_account.json
 
@@ -26,4 +42,5 @@ jobs:
         env:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           GOOGLE_SA_FILE: service_account.json
+          COUNTRY: ${{ steps.pick.outputs.country }}
         run: python google_trends_collector.py
