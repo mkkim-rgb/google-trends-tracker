@@ -134,6 +134,20 @@ def existing_by_kw(ws):
             out.setdefault(row[1], []).append(_coerce(row))
     return out
 
+def apply_calc_formulas(sh):
+    """월간 탭 계산값(D)을 '상대지수 × 설정N' 수식으로 — 설정 N 바꾸면 자동 반영(재실행 불필요)."""
+    for ws in sh.worksheets():
+        if not ws.title.endswith("_월간"):
+            continue
+        country = ws.title.split("_")[1]   # UN_US_월간 → US
+        n = len(ws.get_all_values())
+        if n < 2:
+            continue
+        formulas = [[f"=C{r}*SUMIFS('{CONFIG_TAB}'!$D:$D,'{CONFIG_TAB}'!$B:$B,\"{country}\",'{CONFIG_TAB}'!$C:$C,B{r})"]
+                    for r in range(2, n + 1)]
+        ws.update(range_name=f"D2:D{n}", values=formulas, value_input_option="USER_ENTERED")
+        log(f"  계산값 수식: {ws.title} {n-1}행")
+
 def main():
     today = datetime.date.today().isoformat()
     with open(SA_FILE, encoding="utf-8-sig") as f:   # BOM 견디게
@@ -219,6 +233,7 @@ def main():
         if all_w:
             write_tab(ws_w, hdr_w, all_w); log(f"  → {prefix}_주간 {len(all_w)}행")
 
+    apply_calc_formulas(sh)   # 계산값을 설정N 참조 수식으로 (자동 반영)
     log("완료")
 
 if __name__ == "__main__":
