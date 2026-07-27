@@ -5,11 +5,11 @@ on:
     # ── 주간: 매주 월요일 (MODE=weekly), 나라별 시차 ──
     - cron: "0 21 * * 0"   # KR 월 06:00 KST
     - cron: "0 22 * * 0"   # US 월 07:00 KST
-    - cron: "0 23 * * 0"   # JP 월 08:00 KST
+    - cron: "0 0 * * 1"    # JP 월 09:00 KST (=월 00:00 UTC) — 429 회피로 한 시간 더 늦춤
     # ── 월간: 매월 2일 (MODE=monthly, 전월까지), 나라별 시차 ──
     - cron: "0 21 1 * *"   # KR 2일 06:00 KST (=1일 21:00 UTC)
     - cron: "0 22 1 * *"   # US 2일 07:00 KST
-    - cron: "0 23 1 * *"   # JP 2일 08:00 KST
+    - cron: "0 0 2 * *"    # JP 2일 09:00 KST (=2일 00:00 UTC)
   workflow_dispatch:
     inputs:
       country:
@@ -40,10 +40,10 @@ jobs:
           case "${{ github.event.schedule }}" in
             "0 21 * * 0") C=KR; M=weekly ;;
             "0 22 * * 0") C=US; M=weekly ;;
-            "0 23 * * 0") C=JP; M=weekly ;;
+            "0 0 * * 1")  C=JP; M=weekly ;;
             "0 21 1 * *") C=KR; M=monthly ;;
             "0 22 1 * *") C=US; M=monthly ;;
-            "0 23 1 * *") C=JP; M=monthly ;;
+            "0 0 2 * *")  C=JP; M=monthly ;;
             *) C="${{ github.event.inputs.country }}"; M="${{ github.event.inputs.mode }}" ;;
           esac
           echo "country=$C" >> "$GITHUB_OUTPUT"
