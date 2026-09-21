@@ -1,4 +1,4 @@
-# Google Trends Tracker
+# Google Trends Tracker1
 
 브랜드×국가별 구글 트렌드(월간/주간)를 수집해 구글시트에 기록. GitHub Actions(공개 레포=무료 무제한)로 자동 실행.
 
