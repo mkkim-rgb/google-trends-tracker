@@ -10,6 +10,8 @@ on:
     - cron: "0 21 1 * *"   # KR 2일 06:00 KST (=1일 21:00 UTC)
     - cron: "0 22 1 * *"   # US 2일 07:00 KST
     - cron: "0 0 2 * *"    # JP 2일 09:00 KST (=2일 00:00 UTC)
+    # ── 일간: 매일 (MODE=daily, 최근 약 9개월 일별). 일별 대상 나라 = DAILY_GEOS(기본 US) ──
+    - cron: "30 23 * * *"  # US 매일 08:30 KST (=23:30 UTC)
   workflow_dispatch:
     inputs:
       country:
@@ -17,7 +19,7 @@ on:
         required: false
         default: ""
       mode:
-        description: "weekly / monthly / both"
+        description: "weekly / monthly / daily / both(=주+월) / all(=주+월+일)"
         required: false
         default: "both"
 
@@ -44,6 +46,7 @@ jobs:
             "0 21 1 * *") C=KR; M=monthly ;;
             "0 22 1 * *") C=US; M=monthly ;;
             "0 0 2 * *")  C=JP; M=monthly ;;
+            "30 23 * * *") C=US; M=daily ;;
             *) C="${{ github.event.inputs.country }}"; M="${{ github.event.inputs.mode }}" ;;
           esac
           echo "country=$C" >> "$GITHUB_OUTPUT"
