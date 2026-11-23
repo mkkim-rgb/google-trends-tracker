@@ -5,11 +5,11 @@ on:
     # ── 주간: 매주 월요일 (MODE=weekly), 나라별 시차 ──
     - cron: "0 21 * * 0"   # KR 월 06:00 KST
     - cron: "0 22 * * 0"   # US 월 07:00 KST
-    - cron: "0 0 * * 1"    # JP 월 09:00 KST (=월 00:00 UTC) — 429 회피로 한 시간 더 늦춤
+    - cron: "17 0 * * 1"   # JP 월 09:17 KST (=월 00:17 UTC) — 429 회피 + UTC 정시 혼잡 회피
     # ── 월간: 매월 2일 (MODE=monthly, 전월까지), 나라별 시차 ──
     - cron: "0 21 1 * *"   # KR 2일 06:00 KST (=1일 21:00 UTC)
     - cron: "0 22 1 * *"   # US 2일 07:00 KST
-    - cron: "0 0 2 * *"    # JP 2일 09:00 KST (=2일 00:00 UTC)
+    - cron: "17 0 2 * *"   # JP 2일 09:17 KST (=2일 00:17 UTC)
     # ── 일간: 매일 (MODE=daily, 최근 약 9개월 일별). 일별 대상 나라 = DAILY_GEOS(기본 US) ──
     - cron: "30 23 * * *"  # US 매일 08:30 KST (=23:30 UTC)
   workflow_dispatch:
@@ -42,10 +42,10 @@ jobs:
           case "${{ github.event.schedule }}" in
             "0 21 * * 0") C=KR; M=weekly ;;
             "0 22 * * 0") C=US; M=weekly ;;
-            "0 0 * * 1")  C=JP; M=weekly ;;
+            "17 0 * * 1") C=JP; M=weekly ;;
             "0 21 1 * *") C=KR; M=monthly ;;
             "0 22 1 * *") C=US; M=monthly ;;
-            "0 0 2 * *")  C=JP; M=monthly ;;
+            "17 0 2 * *") C=JP; M=monthly ;;
             "30 23 * * *") C=US; M=daily ;;
             *) C="${{ github.event.inputs.country }}"; M="${{ github.event.inputs.mode }}" ;;
           esac
